@@ -12,10 +12,6 @@ const asciiArt = {
         "  |___________________________|"
     ].join("\n"),
     starfield: [
-        "................................................................................",
-        "................................................................................",
-        "....................*.............*..................*.............*.............",
-        "................................................................................",
         "   ____________________________________________________________________________  ",
         "  /                                                                            \\",
         " /   [o]   [o]   [o]   [o]   [o]   [o]   [o]   [o]   [o]   [o]   [o]   [o]      \\",
@@ -29,57 +25,117 @@ const asciiArt = {
         "|   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *  |",
         "|                                                                              |",
         "|   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *  |",
+        "|                                                                              |",
+        "|   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *  |",
+        "|                                                                              |",
+        "|   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *  |",
+        "|                                                                              |",
+        "|   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *  |",
+        "|                                                                              |",
+        "|   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *  |",
+        "|                                                                              |",
+        "|   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *  |",
+        "|                                                                              |",
+        "|   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *  |",
+        "|                                                                              |",
+        "|   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *  |",
         "|______________________________________________________________________________|"
     ].join("\n"),
-    bottomConsole: name => [
+    bottomConsole: (name, ly) => [
         "   _____________________________",
         "  |  Series 800 Starcraft      |",
         "  |---------------------------|",
         "  |  [o]   [o]   [o]   [o]    |",
         "  |                           |",
         `  |   Pilot: ${name.padEnd(18)}|`,
+        `  |   Ly: ${ly.toString().padEnd(20)}|`,
         "  |___________________________|"
     ].join("\n")
 };
 
 let starFrame = 0;
-function getStarFieldArt() {
-    // Animate stars by shifting their positions every frame
-    const baseArt = asciiArt.console.split('\n');
-    // Simple star animation: replace some '*' with ' ' and move them
-    let animatedArt = baseArt.map((line, idx) => {
-        if (line.includes('*')) {
-            let chars = line.split('');
-            for (let i = 0; i < chars.length; i++) {
-                if (chars[i] === '*') {
-                    // Move star horizontally based on frame and line
-                    let offset = (starFrame + idx + i) % 3;
-                    chars[i] = offset === 0 ? '*' : ' ';
-                }
+let beepOn = true;
+function generateRandomStarfield(width = 100, height = 14, starDensity = 0.07) {
+    let field = [];
+    for (let y = 0; y < height; y++) {
+        let line = '';
+        for (let x = 0; x < width; x++) {
+            if (Math.random() < starDensity) {
+                line += '*';
+            } else {
+                line += ' ';
             }
-            return chars.join('');
         }
-        return line;
-    });
-    return animatedArt.join('\n');
+        field.push(line);
+    }
+    return field;
+}
+
+function getStarFieldArt() {
+    // Generate a random starfield each frame
+    const width = 100;
+    const height = 14;
+    let starfield = generateRandomStarfield(width, height);
+    // Add a box around the starfield
+    let topBorder = '┌' + '─'.repeat(width) + '┐';
+    let bottomBorder = '└' + '─'.repeat(width) + '┘';
+    let boxedStarfield = [topBorder];
+    for (let line of starfield) {
+        boxedStarfield.push('│' + line + '│');
+    }
+    boxedStarfield.push(bottomBorder);
+    // Add the console at the bottom, centered
+    let consoleArt = asciiArt.bottomConsole(playerName, lyGauge).split('\n');
+    let consoleWidth = Math.max(...consoleArt.map(l => l.length));
+    let leftPad = Math.floor((width - consoleWidth) / 2);
+    let rightPad = width - consoleWidth - leftPad;
+    consoleArt = consoleArt.map(line => ' '.repeat(leftPad) + line + ' '.repeat(rightPad));
+    return [...boxedStarfield, ...consoleArt].join('\n');
 }
 
 let playerName = '';
 let fuel = 0;
 let currentScene = 'intro';
+let lyGauge = 0;
+let lyInterval = null;
+let fuelLoreShown = false;
+
+function addLoreMessage(msg) {
+    const loreText = document.getElementById('lore-text');
+    if (!loreText) {
+        console.warn('No lore-text element found!');
+        return;
+    }
+    const div = document.createElement('div');
+    div.textContent = msg;
+    div.style.opacity = '0';
+    div.style.transition = 'opacity 0.7s';
+    div.style.fontFamily = 'inherit';
+    div.style.fontSize = '18px';
+    div.style.background = 'none';
+    div.style.padding = '0';
+    div.style.margin = '0';
+    // Insert at the top
+    loreText.insertBefore(div, loreText.firstChild);
+    setTimeout(() => { div.style.opacity = '1'; }, 50);
+}
 
 function renderIntro() {
+    lyGauge = 0;
+    if (lyInterval) {
+        clearInterval(lyInterval);
+        lyInterval = null;
+    }
+    // Hide fuel section on starter screen
+    const fuelSection = document.getElementById('fuel-section');
+    if (fuelSection) fuelSection.style.display = 'none';
     document.getElementById('ascii').textContent = asciiArt.introConsole;
-    document.getElementById('output').textContent =
-        "You awake slowly on the cold metal floor of a dimly lit metal box. A small console blinks in front of you.";
+    document.getElementById('output').textContent = '';
     document.getElementById('name-entry').style.display = 'block';
-    document.getElementById('input').style.display = 'none';
-    document.getElementById('fuel-count').style.display = 'none';
-    document.getElementById('fuel-btn').style.display = 'none';
     document.getElementById('save-btn').style.display = 'none';
     document.getElementById('load-btn').style.display = 'none';
     // Animate yellow beeping light
-    let beepOn = true;
+    beepOn = true;
     if (window.beepInterval) clearInterval(window.beepInterval);
     window.beepInterval = setInterval(() => {
         let art = asciiArt.introConsole.split("\n");
@@ -87,49 +143,58 @@ function renderIntro() {
         document.getElementById('ascii').textContent = art.join("\n");
         beepOn = !beepOn;
     }, 500);
+    // Show first lore message
+    setTimeout(() => {
+        addLoreMessage('You awake slowly on the cold metallic floor of a dimly lit metal box. A small console blinks in front of you.');
+    }, 0);
 }
 
 function startGame() {
     document.getElementById('name-entry').style.display = 'none';
-    document.getElementById('input').style.display = 'block';
     currentScene = 'starfield';
     if (window.beepInterval) clearInterval(window.beepInterval);
     renderStarfield();
-}
-
-function renderConsole() {
-    // Not used anymore, replaced by renderStarfield
+    setTimeout(() => {
+        const bottomBubble = document.getElementById('bottom-bubble');
+        if (bottomBubble) bottomBubble.style.display = 'block';
+    }, 5000);
 }
 
 function renderStarfield() {
+    // Show fuel section on main game screen after 5 seconds
+    const fuelSection = document.getElementById('fuel-section');
+    if (fuelSection) fuelSection.style.display = 'none'; // Hide initially
+    // Hide bottom bubble initially
+    const bottomBubble = document.getElementById('bottom-bubble');
+    if (bottomBubble) bottomBubble.style.display = 'none';
     // Animate starfield and show console at bottom
     function drawScene() {
-        let baseArt = asciiArt.starfield.split("\n");
-        let animatedArt = baseArt.map((line, idx) => {
-            if (line.includes('*')) {
-                let chars = line.split('');
-                for (let i = 0; i < chars.length; i++) {
-                    if (chars[i] === '*') {
-                        let offset = (starFrame + idx + i) % 3;
-                        chars[i] = offset === 0 ? '*' : ' ';
-                    }
-                }
-                return chars.join('');
-            }
-            return line;
-        });
-        // Add console at bottom
-        animatedArt.push(asciiArt.bottomConsole(playerName));
-        document.getElementById('ascii').textContent = animatedArt.join("\n");
+        document.getElementById('ascii').textContent = getStarFieldArt();
         document.getElementById('fuel-count').textContent = 'Fuel: ' + fuel;
         document.getElementById('fuel-count').style.display = 'inline-block';
         document.getElementById('fuel-btn').style.display = 'inline-block';
         document.getElementById('save-btn').style.display = 'inline-block';
         document.getElementById('load-btn').style.display = 'inline-block';
     }
-    document.getElementById('output').textContent =
-        'Stars drift by outside the glass.\nType a command to begin.';
-    document.getElementById('input').value = '';
+    // Start Ly gauge interval
+    if (lyInterval) clearInterval(lyInterval);
+    lyInterval = setInterval(() => {
+        if (fuel > 0) {
+            lyGauge++;
+            fuel--;
+            document.getElementById('fuel-count').textContent = 'Fuel: ' + fuel;
+            drawScene();
+        }
+    }, 1000);
+    // Lore messages in order
+    setTimeout(() => {
+        addLoreMessage('You press down on the metallic keys, spelling out your name. After a moment, the console beeps and the viewport shifts to reveal a starfield outside.');
+    }, 0);
+    setTimeout(() => {
+        addLoreMessage("After gathering yourself and belongings you look around and find an old dark matter centrifuge from the 2100's. Looks like it still works...");
+        if (fuelSection) fuelSection.style.display = 'flex';
+        if (bottomBubble) bottomBubble.style.display = 'flex';
+    }, 5000);
     // Prevent multiple intervals
     if (window.starfieldInterval) {
         clearInterval(window.starfieldInterval);
@@ -140,22 +205,6 @@ function renderStarfield() {
         if (currentScene === 'starfield') drawScene();
     }, 300);
     drawScene();
-}
-
-function handleInput(e) {
-    if (e.key === 'Enter') {
-        const value = e.target.value.trim().toLowerCase();
-        if (currentScene === 'console') {
-            // Example: respond to basic commands
-            if (value === 'look') {
-                document.getElementById('output').textContent += "\nYou see blinking lights and drifting stars.";
-            } else if (value === 'help') {
-                document.getElementById('output').textContent += "\nTry commands like 'look', 'scan', 'status'.";
-            } else {
-                document.getElementById('output').textContent += "\nUnknown command. Try 'help'.";
-            }
-        }
-    }
 }
 
 function handleNameSubmit() {
@@ -180,35 +229,67 @@ function loadGame() {
     if (state && state.currentScene) {
         currentScene = state.currentScene;
         playerName = state.playerName || '';
-        if (currentScene === 'console') {
-            document.getElementById('name-entry').style.display = 'none';
-            document.getElementById('input').style.display = 'block';
-            renderConsole();
-            document.getElementById('output').textContent += "\nGame loaded!";
-        } else {
-            renderIntro();
-            document.getElementById('output').textContent += "\nGame loaded!";
-        }
+        // Only renderIntro, no input box or console
+        renderIntro();
+        document.getElementById('output').textContent += "\nGame loaded!";
     } else {
         document.getElementById('output').textContent += "\nNo saved game found.";
     }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('input').addEventListener('keydown', handleInput);
     document.getElementById('save-btn').addEventListener('click', showSaveScreen);
     document.getElementById('load-btn').addEventListener('click', showLoadScreen);
     document.getElementById('fuel-btn').addEventListener('click', () => {
         fuel++;
         document.getElementById('fuel-count').textContent = 'Fuel: ' + fuel;
+        // Show lore message only on first click
+        if (!fuelLoreShown) {
+            addLoreMessage('Upon activation the centrifuge whirls to life with a cacophony of metallic clangs and dark matter begins pouring into the crucible in liquid form.');
+            fuelLoreShown = true;
+        }
     });
     document.getElementById('name-submit').addEventListener('click', handleNameSubmit);
     document.getElementById('name-input').addEventListener('keydown', function(e) {
         if (e.key === 'Enter') handleNameSubmit();
     });
     document.getElementById('savefile-submit').addEventListener('click', saveGame);
-    document.getElementById('loadfile-select').addEventListener('change', loadGame);
-    document.getElementById('deletefile-btn').addEventListener('click', deleteSaveFile);
+    document.getElementById('loadfile-list').addEventListener('click', function(e) {
+        if (e.target.classList.contains('load-save-btn')) {
+            loadNamedGame(e.target.getAttribute('data-key'));
+        } else if (e.target.classList.contains('delete-save-btn')) {
+            deleteNamedGame(e.target.getAttribute('data-key'));
+        }
+    });
+
+    // Menu button dropdown logic
+    const menuBtn = document.getElementById('menu-btn');
+    if (menuBtn) {
+        menuBtn.addEventListener('click', function() {
+            const dropdown = document.getElementById('menu-dropdown');
+            if (dropdown) {
+                dropdown.style.display = dropdown.style.display === 'block' ? 'none' : 'block';
+            }
+        });
+    }
+    // New Game button logic
+    const newGameBtn = document.getElementById('newgame-btn');
+    if (newGameBtn) {
+        newGameBtn.addEventListener('click', function() {
+            if (confirm('Are you sure you want to start a new game? This will erase your current progress.')) {
+                // Reset game state
+                playerName = '';
+                fuel = 0;
+                currentScene = 'intro';
+                // Hide dropdown
+                const dropdown = document.getElementById('menu-dropdown');
+                if (dropdown) dropdown.style.display = 'none';
+                renderIntro();
+            }
+        });
+    }
+
+    // Always start fresh on page load
     renderIntro();
 });
 
@@ -261,35 +342,16 @@ function showLoadScreen() {
             </div>`;
         }
     }
-    if (!found) html = '<em>No saves found.</em>';
-    listDiv.innerHTML = html;
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('input').addEventListener('keydown', handleInput);
-    document.getElementById('save-btn').addEventListener('click', showSaveScreen);
-    document.getElementById('load-btn').addEventListener('click', showLoadScreen);
-    document.getElementById('fuel-btn').addEventListener('click', () => {
-        fuel++;
-        document.getElementById('fuel-count').textContent = 'Fuel: ' + fuel;
-    });
-    document.getElementById('name-submit').addEventListener('click', handleNameSubmit);
-    document.getElementById('name-input').addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') handleNameSubmit();
-    });
-    document.getElementById('savefile-submit').addEventListener('click', saveGame);
-    document.getElementById('loadfile-list').addEventListener('click', function(e) {
-        if (e.target.classList.contains('load-save-btn')) {
-            loadNamedGame(e.target.getAttribute('data-key'));
-        } else if (e.target.classList.contains('delete-save-btn')) {
-            deleteNamedGame(e.target.getAttribute('data-key'));
-        }
-    });
-    // Only render intro if not restoring a loaded game
-    if (!window.__loadedFromSave) {
-        renderIntro();
+    if (!found) {
+        html = '<em>No saves found.</em>';
+        listDiv.innerHTML = html;
+        setTimeout(() => {
+            document.getElementById('loadfile-screen').style.display = 'none';
+        }, 2000);
+    } else {
+        listDiv.innerHTML = html;
     }
-});
+}
 
 function loadNamedGame(key) {
     const state = JSON.parse(localStorage.getItem(key));
