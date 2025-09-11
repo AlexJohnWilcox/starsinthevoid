@@ -17,13 +17,14 @@
 
 	<div id="main-flex" style="display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-start; gap:0; position:relative; width:100%;">
 		<div style="display:flex; flex-direction:row; gap:48px; width:100%;">
-			<div id="game-container" style="overflow:hidden; position:relative; margin-left:0px; margin-right:24px; max-height:540px;">
+			<div id="game-container" style="overflow:visible; position:relative; margin-left:0px; margin-right:24px; max-height:540px;">
 				<div id="ascii" class="ascii-art"></div>
 				<div id="ly-toggle-wrapper" style="display:none; margin:12px 0 0 0; text-align:center;">
 					<label style="display:inline-flex;align-items:center;gap:6px;font-size:16px;">
 						<input type="checkbox" id="ly-switch" checked style="width:18px;height:18px;">
 						<span>DM-&gt;Ly</span>
 					</label>
+					<button id="systems-btn" style="display:none;margin-left:16px;padding:4px 12px;font-size:14px;border:none;border-radius:6px;background:#555;color:#fff;cursor:pointer;box-shadow:0 2px 8px #000a;">Systems</button>
 				</div>
 				<div id="output"></div>
 				<div id="name-entry" style="display:none; text-align:center; margin-top:16px;">
