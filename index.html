@@ -17,17 +17,19 @@
 
 	<div id="main-flex" style="display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-start; gap:0; position:relative; width:100%;">
 		<div style="display:flex; flex-direction:row; gap:48px; width:100%;">
-			<div id="game-container" style="max-height:560px; overflow:hidden; position:relative; margin-left:0px; margin-right:24px;">
+			<div id="game-container" style="overflow:hidden; position:relative; margin-left:0px; margin-right:24px; max-height:540px;">
 				<div id="ascii" class="ascii-art"></div>
+				<div id="ly-toggle-wrapper" style="display:none; margin:12px 0 0 0; text-align:center;">
+					<label style="display:inline-flex;align-items:center;gap:6px;font-size:16px;">
+						<input type="checkbox" id="ly-switch" checked style="width:18px;height:18px;">
+						<span>DM-&gt;Ly</span>
+					</label>
+				</div>
 				<div id="output"></div>
 				<div id="name-entry" style="display:none; text-align:center; margin-top:16px;">
 					<input id="name-input" type="text" autocomplete="off" placeholder="Enter your name..." style="width:60%; font-size:18px;" />
 					<button id="name-submit">Submit</button>
 				</div>
-				<label style="display:flex;align-items:center;gap:6px;font-size:16px;position:absolute;top:18px;right:18px;z-index:10;">
-					<input type="checkbox" id="ly-switch" checked style="width:18px;height:18px;">
-					<span>DM-&gt;Ly</span>
-				</label>
 			</div>
 		</div>
 		<div id="lore-text" style="width:100%;margin-top:24px;"></div>
@@ -36,6 +38,7 @@
 				<span id="fuel-count" style="font-size:16px;color:#fff;">Fuel: 0</span>
 				<button id="fuel-btn" style="font-size:16px;padding:4px 12px;border-radius:6px;background:#444;color:#fff;border:none;box-shadow:0 2px 8px #000a;">+1 Fuel</button>
 			</div>
+			<div id="upgrades" style="display:flex;align-items:center;gap:24px;margin-left:48px;"></div>
 		</div>
 	</div>
 	<div id="save-load-modal" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.6); z-index:3000; align-items:center; justify-content:center;">
