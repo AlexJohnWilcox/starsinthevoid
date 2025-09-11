@@ -87,6 +87,8 @@ let coPilotOnlineLoreShown = false; // ensure online lore shows only once
 let milestone50Fired = false; // fires exactly once when Ly crosses 50
 let lookAroundLoreShown = false; // prevents duplicate environment lore
 let developerMode = false; // cheat mode: name 'ajmemes'
+let milestone100Fired = false; // lights on + state
+let milestone100LoreShown = false; // show 100 Ly lore once
 // ---- Shop & Upgrades State ----
 let currentView = 'main'; // 'main' or 'shop'
 let coPilotLevel = 1; // each level adds +2 DM/sec (base provided by constants)
@@ -94,16 +96,31 @@ let coPilotLevel = 1; // each level adds +2 DM/sec (base provided by constants)
 let engineLevel = 1; // legacy (kept for migration)
 // New engine upgrade model:
 let capacityLevel = 1; // DM consumed per second (>=1)
-let efficiencyLevel = 1; // 1 = 1 Ly per DM, 2 = 2 Ly per DM (single upgrade)
+let efficiencyLevel = 1; // 1 = 1 Ly per DM, 2 = 5 Ly per DM (single upgrade)
+let stardust = 0;
+let collapseCooldownUntil = 0; // timestamp ms
+let starCollapserOnline = false;
 const CO_PILOT_BASE_GAIN = 2; // DM/sec per co-pilot level
 // Dynamic escalating costs (persisted)
 let coPilotUpgradeCost = 150;
 let capacityUpgradeCost = 200;
-let efficiencyUpgradeCost = 300; // one-time
+let efficiencyUpgradeCost = 500; // one-time
+// Manual dump upgrade: each level adds +1 to click gain
+let dumpUpgradeLevel = 0;
+let dumpUpgradeCost = 100;
 function getCoPilotUpgradeCost() { return coPilotUpgradeCost; }
 function getCapacityUpgradeCost() { return capacityUpgradeCost; }
 function getEfficiencyUpgradeCost() { return efficiencyUpgradeCost; }
 function totalLyPerSecond() { return capacityLevel + (efficiencyLevel - 1); }
+function getDumpUpgradeCost() { return dumpUpgradeCost; }
+function currentClickGain() {
+    const base = developerMode ? 100 : 1;
+    return base + dumpUpgradeLevel;
+}
+function updateFuelButtonLabel() {
+    const fb = document.getElementById('fuel-btn');
+    if (fb) fb.textContent = `Dump Fuel (+${currentClickGain()})`;
+}
 
 function getSaveData() {
     const raw = localStorage.getItem('asciiSaveSlot');
@@ -122,7 +139,7 @@ function setSaveData(data) {
 function saveGame() {
     const lySwitchEl = document.getElementById('ly-switch');
     if (lySwitchEl) lyConversionOn = lySwitchEl.checked;
-    setSaveData({ playerName, fuel, currentScene, lyGauge, fuelLoreShown, lyConversionOn, milestone50LoreShown, coPilotPurchased, coPilotActive, coPilotButtonAdded, coPilotOnlineLoreShown, milestone50Fired, lookAroundLoreShown, developerMode, currentView, coPilotLevel, engineLevel, capacityLevel, efficiencyLevel, coPilotUpgradeCost, capacityUpgradeCost, efficiencyUpgradeCost });
+    setSaveData({ playerName, fuel, currentScene, lyGauge, fuelLoreShown, lyConversionOn, milestone50LoreShown, coPilotPurchased, coPilotActive, coPilotButtonAdded, coPilotOnlineLoreShown, milestone50Fired, lookAroundLoreShown, developerMode, milestone100Fired, milestone100LoreShown, currentView, coPilotLevel, engineLevel, capacityLevel, efficiencyLevel, coPilotUpgradeCost, capacityUpgradeCost, efficiencyUpgradeCost, stardust, collapseCooldownUntil, starCollapserOnline, dumpUpgradeLevel, dumpUpgradeCost });
     // Save lore messages
     const loreText = document.getElementById('lore-text');
     if (loreText) {
@@ -140,6 +157,12 @@ function restoreLoreText() {
     const savedLore = localStorage.getItem('asciiLoreText');
     if (loreText && savedLore) {
         loreText.innerHTML = savedLore;
+        // Trim to 6 newest entries if needed
+        while (loreText.children.length > 6) {
+            const oldest = loreText.lastElementChild;
+            if (!oldest) break;
+            oldest.remove();
+        }
     }
 }
 
@@ -159,6 +182,8 @@ function loadGame() {
     coPilotOnlineLoreShown = !!data.coPilotOnlineLoreShown;
     milestone50Fired = !!data.milestone50Fired || lyGauge >= 50; // infer if already past
     lookAroundLoreShown = !!data.lookAroundLoreShown;
+    milestone100Fired = !!data.milestone100Fired || lyGauge >= 100;
+    milestone100LoreShown = !!data.milestone100LoreShown;
         currentView = data.currentView || 'main';
         coPilotLevel = data.coPilotLevel || 1;
     engineLevel = data.engineLevel || 1; // legacy
@@ -166,7 +191,12 @@ function loadGame() {
     efficiencyLevel = data.efficiencyLevel || 1;
     coPilotUpgradeCost = data.coPilotUpgradeCost || Math.ceil(150 * Math.pow(1.2, (coPilotLevel - 1)));
     capacityUpgradeCost = data.capacityUpgradeCost || Math.ceil(200 * Math.pow(1.2, (capacityLevel - 1)));
-    efficiencyUpgradeCost = data.efficiencyUpgradeCost || 300;
+    efficiencyUpgradeCost = data.efficiencyUpgradeCost || 500;
+    stardust = data.stardust || 0;
+    collapseCooldownUntil = data.collapseCooldownUntil || 0;
+    starCollapserOnline = !!data.starCollapserOnline;
+    dumpUpgradeLevel = data.dumpUpgradeLevel || 0;
+    dumpUpgradeCost = data.dumpUpgradeCost || Math.ceil(100 * Math.pow(1.2, dumpUpgradeLevel));
     restoreLoreText();
     developerMode = !!data.developerMode;
     if (developerMode && lyGauge < 45) lyGauge = 45;
@@ -181,6 +211,8 @@ function loadGame() {
             // slight delay to ensure DOM nodes exist
             setTimeout(() => { renderShopControls(); }, 50);
         }
+        // Ensure stardust UI reflects saved state
+        setTimeout(() => { ensureStardustUI(); }, 60);
     } else {
         renderIntro();
     }
@@ -199,7 +231,99 @@ function addLoreMessage(msg) {
     div.style.padding = '0';
     div.style.margin = '0 0 36px 0';
     loreText.insertBefore(div, loreText.firstChild);
+    // Track in ship log
+    appendToShipLog(msg);
+    // Strictly cap to 6 visible entries (immediate removal to avoid buildup during spam)
+    while (loreText.children.length > 6) {
+        const oldest = loreText.lastElementChild;
+        if (!oldest) break;
+        oldest.remove();
+    }
     setTimeout(() => { div.style.opacity = '1'; }, 50);
+}
+
+// --- Ship log (persist all lore) ---
+function appendToShipLog(msg) {
+    try {
+        const raw = localStorage.getItem('asciiLogBook');
+        const log = raw ? JSON.parse(raw) : [];
+        // Avoid consecutive identical duplicates
+        if (log.length === 0 || log[log.length - 1].m !== msg) {
+            log.push({ t: Date.now(), m: msg });
+        }
+        localStorage.setItem('asciiLogBook', JSON.stringify(log));
+    } catch(e) { /* ignore */ }
+}
+
+function showLogBook() {
+    // Simple overlay viewer to scroll to oldest message
+    const existing = document.getElementById('ascii-logbook-overlay');
+    if (existing) { existing.remove(); }
+    const wrap = document.createElement('div');
+    wrap.id = 'ascii-logbook-overlay';
+    wrap.style.position = 'fixed';
+    wrap.style.top = '0';
+    wrap.style.left = '0';
+    wrap.style.width = '100vw';
+    wrap.style.height = '100vh';
+    wrap.style.background = 'rgba(0,0,0,0.85)';
+    wrap.style.zIndex = '99998';
+    wrap.style.display = 'flex';
+    wrap.style.flexDirection = 'column';
+    wrap.style.alignItems = 'center';
+    wrap.style.justifyContent = 'center';
+    const inner = document.createElement('div');
+    inner.style.maxWidth = '900px';
+    inner.style.width = '90%';
+    inner.style.maxHeight = '70vh';
+    inner.style.overflow = 'auto';
+    inner.style.background = '#222';
+    inner.style.color = '#eee';
+    inner.style.borderRadius = '12px';
+    inner.style.boxShadow = '0 0 18px #000a';
+    inner.style.padding = '24px';
+    const title = document.createElement('div');
+    title.textContent = 'Ship Logbook';
+    title.style.fontSize = '20px';
+    title.style.marginBottom = '12px';
+    inner.appendChild(title);
+    const list = document.createElement('div');
+    list.style.display = 'flex';
+    list.style.flexDirection = 'column';
+    list.style.gap = '12px';
+    try {
+        const raw = localStorage.getItem('asciiLogBook');
+        let log = raw ? JSON.parse(raw) : [];
+        // Newest-first in the overlay
+        log = log.slice().reverse();
+        // Remove adjacent duplicates in this view as well
+        let last = null;
+        for (const entry of log) {
+            if (last && last.m === entry.m) { continue; }
+            const row = document.createElement('div');
+            row.textContent = new Date(entry.t).toLocaleString() + ' — ' + entry.m;
+            row.style.fontSize = '15px';
+            list.appendChild(row);
+            last = entry;
+        }
+    } catch(e) {}
+    inner.appendChild(list);
+    const btns = document.createElement('div');
+    btns.style.display = 'flex';
+    btns.style.gap = '12px';
+    btns.style.marginTop = '16px';
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.style.padding = '6px 12px';
+    closeBtn.style.border = 'none';
+    closeBtn.style.borderRadius = '6px';
+    closeBtn.style.background = '#555';
+    closeBtn.style.color = '#fff';
+    closeBtn.onclick = () => wrap.remove();
+    btns.appendChild(closeBtn);
+    inner.appendChild(btns);
+    wrap.appendChild(inner);
+    document.body.appendChild(wrap);
 }
 
 function renderIntro() {
@@ -237,8 +361,7 @@ function handleNameSubmit() {
         if (name.toLowerCase() === 'ajmemes') {
             developerMode = true;
             addLoreMessage('[DEV MODE ENABLED: +100 FUEL PER CLICK]');
-            const fb = document.getElementById('fuel-btn');
-            if (fb) fb.textContent = '+100 Fuel';
+            updateFuelButtonLabel();
         }
         currentScene = 'starfield';
         if (window.beepInterval) clearInterval(window.beepInterval);
@@ -250,13 +373,14 @@ function handleNameSubmit() {
         const bottomBubble = document.getElementById('bottom-bubble');
         if (bottomBubble) bottomBubble.style.display = 'block';
         const fuelSection = document.getElementById('fuel-section');
-        if (fuelSection) fuelSection.style.display = 'none';
+    if (fuelSection) fuelSection.style.display = 'none';
         setTimeout(() => {
             fuel = 0;
             if (fuelSection) {
                 fuelSection.style.display = 'flex';
                 const fuelCount = document.getElementById('fuel-count');
-                if (fuelCount) fuelCount.textContent = 'Fuel: ' + fuel;
+                if (fuelCount) fuelCount.textContent = 'Dark Matter: ' + fuel;
+                updateFuelButtonLabel();
             }
             // environment lore handled in renderStarfield delayed reveal; removed duplicate here
         }, 5000);
@@ -271,10 +395,17 @@ function ensureLyToggle() {
     if (lySwitch && !lySwitch.__wired) {
         lySwitch.addEventListener('change', e => {
             lyConversionOn = e.target.checked;
+            // Update label text to reflect state
+            const labelSpan = lyToggleWrapper ? lyToggleWrapper.querySelector('span') : null;
+            if (labelSpan) labelSpan.textContent = lyConversionOn ? 'Engine On' : 'Engine Off';
         });
         lySwitch.__wired = true;
     }
-    if (lySwitch) lySwitch.checked = lyConversionOn; // reflect saved state
+    if (lySwitch) {
+        lySwitch.checked = lyConversionOn; // reflect saved state
+        const labelSpan = lyToggleWrapper ? lyToggleWrapper.querySelector('span') : null;
+        if (labelSpan) labelSpan.textContent = lyConversionOn ? 'Engine On' : 'Engine Off';
+    }
 }
 
 function generateRandomStarfield(width = 100, height = 14, starDensity = 0.07) {
@@ -327,24 +458,19 @@ function getShopAscii(width) {
     const lines = [];
     lines.push(top);
     lines.push(center(title));
-    lines.push(center('============== STATUS =============='));
-    lines.push(center(`Co-Pilot Lvl ${coPilotLevel}  (+${CO_PILOT_BASE_GAIN * coPilotLevel} DM/s)`));
-    lines.push(center(`Next Upgrade: ${getCoPilotUpgradeCost()} DM`));
+    lines.push(center('============ SYSTEMS ============'));
+    lines.push(center(`Co-Pilot: Lvl ${coPilotLevel} (+${CO_PILOT_BASE_GAIN * coPilotLevel} DM/s)`));
+    lines.push(center(`Engine: ${capacityLevel} DM -> ${efficiencyLevel === 1 ? capacityLevel : 5} Ly`));
+    lines.push(center(`Manual Dump: +${currentClickGain()} DM/click`));
+    lines.push(center(`Star Collapser: ${starCollapserOnline ? 'Online' : 'Offline'}`));
     lines.push(center(''));
-    lines.push(center(`Co-Pilot Output: +${CO_PILOT_BASE_GAIN * coPilotLevel} DM/s`));
-    lines.push(center(`Capacity: ${capacityLevel} DM/s`));
-    lines.push(center(`Efficiency: ${efficiencyLevel === 1 ? 'Standard (1 DM -> 1 Ly)' : 'Enhanced (1 DM -> 2 Ly)'}`));
-    lines.push(center(`Engine Output: ${capacityLevel} DM -> ${totalLyPerSecond()} Ly /s`));
+    lines.push(center(`Upgrade Co-Pilot (Lvl ${coPilotLevel}): Cost ${getCoPilotUpgradeCost()} DM`));
+    lines.push(center(`Upgrade Capacity (Lvl ${capacityLevel}): Cost ${getCapacityUpgradeCost()} DM`));
     if (efficiencyLevel === 1) {
-        lines.push(center(`Efficiency Upgrade Cost: ${getEfficiencyUpgradeCost()} DM`));
-    } else {
-        lines.push(center('Efficiency Upgrade: COMPLETE'));
+        lines.push(center(`Upgrade Efficiency: Cost ${getEfficiencyUpgradeCost()} DM`));
     }
-    lines.push(center(`Capacity Upgrade Cost: ${getCapacityUpgradeCost()} DM`));
     lines.push(center(''));
-    lines.push(center('[Use upgrade buttons below]'));
-    lines.push(center('[Return button below]'));
-    while (lines.length < 14) lines.push(center(''));
+    while (lines.length < 6) lines.push(center(''));
     lines.push(bottom);
     return lines.join('\n');
 }
@@ -394,19 +520,30 @@ function createCoPilotPurchaseButton(upgrades) {
     btn.addEventListener('click', () => {
         if (fuel >= 100 && !coPilotPurchased) {
             fuel -= 100;
-            document.getElementById('fuel-count').textContent = 'Fuel: ' + fuel;
+            document.getElementById('fuel-count').textContent = 'Dark Matter: ' + fuel;
             coPilotPurchased = true;
+            addLoreMessage('[SHIP COPILOT ONLINE]');
             btn.remove();
             createCoPilotSwitch();
         }
     });
-    upgrades.appendChild(btn);
+    // Move to ly-toggle-wrapper area next to engine switch
+    const toggleWrap = document.getElementById('ly-toggle-wrapper');
+    if (toggleWrap) {
+        const spacer = document.createElement('span');
+        spacer.style.display = 'inline-block';
+        spacer.style.width = '16px';
+        toggleWrap.appendChild(spacer);
+        toggleWrap.appendChild(btn);
+    } else {
+        upgrades.appendChild(btn);
+    }
     coPilotButtonAdded = true;
 }
 
 function createCoPilotSwitch() {
+    const toggleWrap = document.getElementById('ly-toggle-wrapper');
     const upgrades = document.getElementById('upgrades');
-    if (!upgrades) return;
     coPilotSwitch = document.createElement('button');
     coPilotSwitch.id = 'copilot-switch-btn';
     coPilotSwitch.textContent = 'Ship Co-Pilot: OFF';
@@ -418,7 +555,15 @@ function createCoPilotSwitch() {
     coPilotSwitch.style.borderRadius = '6px';
     coPilotSwitch.style.boxShadow = '0 2px 8px #000a';
     coPilotSwitch.addEventListener('click', toggleCoPilotActive);
-    upgrades.appendChild(coPilotSwitch);
+    if (toggleWrap) {
+        const spacer = document.createElement('span');
+        spacer.style.display = 'inline-block';
+        spacer.style.width = '10px';
+        toggleWrap.appendChild(spacer);
+        toggleWrap.appendChild(coPilotSwitch);
+    } else if (upgrades) {
+        upgrades.appendChild(coPilotSwitch);
+    }
         ensureSystemsButton();
 }
 
@@ -438,7 +583,7 @@ function toggleCoPilotActive() {
             // Auto-generate DM based on current Co-Pilot level
             fuel += CO_PILOT_BASE_GAIN * coPilotLevel;
             const fc = document.getElementById('fuel-count');
-            if (fc) fc.textContent = 'Fuel: ' + fuel;
+            if (fc) fc.textContent = 'Dark Matter: ' + fuel;
         }, 1000);
     } else {
         if (autoDMInterval) { clearInterval(autoDMInterval); autoDMInterval = null; }
@@ -468,10 +613,11 @@ function renderStarfield(skipIntroLore = false) {
 
     if (skipIntroLore) {
         // Loaded from save: show immediately (no delay, keep existing fuel amount)
-        if (fuelSection) {
+            if (fuelSection) {
             fuelSection.style.display = 'flex';
             const fuelCount = document.getElementById('fuel-count');
-            if (fuelCount) fuelCount.textContent = 'Fuel: ' + fuel;
+            if (fuelCount) fuelCount.textContent = 'Dark Matter: ' + fuel;
+            updateFuelButtonLabel();
         }
         if (lyToggleWrapper) ensureLyToggle();
     } else {
@@ -480,7 +626,8 @@ function renderStarfield(skipIntroLore = false) {
             if (fuelSection) {
                 fuelSection.style.display = 'flex';
                 const fuelCount = document.getElementById('fuel-count');
-                if (fuelCount) fuelCount.textContent = 'Fuel: ' + fuel;
+                if (fuelCount) fuelCount.textContent = 'Dark Matter: ' + fuel;
+                updateFuelButtonLabel();
             }
             if (lyToggleWrapper) ensureLyToggle();
             if (!lookAroundLoreShown) {
@@ -495,7 +642,7 @@ function renderStarfield(skipIntroLore = false) {
         if (asciiEl) asciiEl.textContent = getStarFieldArt();
         const fuelCountEl = document.getElementById('fuel-count');
         if (fuelCountEl) {
-            fuelCountEl.textContent = 'Fuel: ' + fuel;
+            fuelCountEl.textContent = 'Dark Matter: ' + fuel;
             fuelCountEl.style.display = 'inline-block';
         }
         const fuelBtnEl = document.getElementById('fuel-btn');
@@ -503,6 +650,7 @@ function renderStarfield(skipIntroLore = false) {
         // Removed references to old save/load buttons that no longer exist (save-btn, load-btn)
     // Toggle already positioned below ASCII art via HTML structure
     fireMilestone50();
+    fireMilestone100();
     }
     if (lyInterval) clearInterval(lyInterval);
     lyInterval = setInterval(() => {
@@ -510,15 +658,17 @@ function renderStarfield(skipIntroLore = false) {
         if (lySwitchEl) lyConversionOn = lySwitchEl.checked;
         if (fuel > 0 && lyConversionOn) {
             const dmToConsume = Math.min(capacityLevel, fuel); // can't exceed available fuel
-            const lyProduced = dmToConsume + (efficiencyLevel - 1); // +1 Ly if efficiency upgraded
+            const effBonus = efficiencyLevel === 1 ? 0 : 4; // efficiency 2 makes 1 DM -> 5 Ly
+            const lyProduced = dmToConsume + effBonus; // produce DM consumed + bonus
             fuel -= dmToConsume;
             lyGauge += lyProduced;
             const fc = document.getElementById('fuel-count');
-            if (fc) fc.textContent = 'Fuel: ' + fuel;
+            if (fc) fc.textContent = 'Dark Matter: ' + fuel;
             drawScene();
         }
         // Boundary detection: if we just crossed 50 this tick fire immediately
         if (!milestone50Fired && lyGauge >= 50) fireMilestone50();
+        if (lyGauge >= 100) fireMilestone100();
     }, 1000);
     if (!skipIntroLore && typeof LORE_MESSAGES !== 'undefined') {
         setTimeout(() => {
@@ -533,10 +683,23 @@ function renderStarfield(skipIntroLore = false) {
         starFrame++;
         if (currentScene === 'starfield') drawScene();
         if (!milestone50Fired && lyGauge >= 50) fireMilestone50();
+        if (lyGauge >= 100) fireMilestone100();
     }, 300);
     drawScene();
     // Immediate milestone evaluation for loaded saves
     if (!milestone50Fired && lyGauge >= 50) fireMilestone50();
+    if (lyGauge >= 100) fireMilestone100();
+}
+
+function fireMilestone100() {
+    if (lyGauge < 100) return;
+    if (!milestone100Fired) {
+        milestone100Fired = true;
+    }
+    if (!milestone100LoreShown) {
+        addLoreMessage('[100Ly from Origin] A hum begins buzzing in your ear as the ships main lights begin turning on... you finally can see what lies at the edges of the ship, a new model star-collapser');
+        milestone100LoreShown = true;
+    }
 }
 
 function clearSaveData() {
@@ -552,19 +715,25 @@ document.addEventListener('DOMContentLoaded', () => {
         renderIntro();
     }
     if (coPilotPurchased) ensureSystemsButton();
+    ensureStardustUI();
     document.getElementById('save-slot-btn').onclick = saveGame;
     document.getElementById('wipe-save-btn').onclick = () => {
         clearSaveData();
+        try { localStorage.removeItem('asciiLogBook'); } catch(e){}
         location.reload();
     };
+    const logBtn = document.getElementById('logbook-btn');
+    if (logBtn) logBtn.onclick = showLogBook;
     document.getElementById('name-submit').onclick = handleNameSubmit;
     document.getElementById('name-input').addEventListener('keydown', function(e) {
         if (e.key === 'Enter') handleNameSubmit();
     });
+    const fuelBtnInit = document.getElementById('fuel-btn');
+    updateFuelButtonLabel();
     document.getElementById('fuel-btn').onclick = () => {
-        const gain = developerMode ? 100 : 1;
+        const gain = currentClickGain();
         fuel += gain;
-        document.getElementById('fuel-count').textContent = 'Fuel: ' + fuel;
+    document.getElementById('fuel-count').textContent = 'Dark Matter: ' + fuel;
         if (!fuelLoreShown) {
             addLoreMessage('Upon activation the centrifuge whirls to life with a cacophony of metallic clangs and dark matter begins pouring into the crucible in liquid form.');
             fuelLoreShown = true;
@@ -572,8 +741,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     // Adjust button label if reloading into dev mode
     if (developerMode) {
-        const fb = document.getElementById('fuel-btn');
-        if (fb) fb.textContent = '+100 Fuel';
+        updateFuelButtonLabel();
     }
     document.getElementById('ly-switch').onchange = function() {
         lyConversionOn = this.checked;
@@ -597,7 +765,6 @@ function ensureSystemsButton() {
                 if (currentView === 'shop') {
                     // Return to main console
                     currentView = 'main';
-                    addLoreMessage('[SYSTEMS INTERFACE CLOSED]');
                     const sc = document.getElementById('shop-controls');
                     if (sc) sc.remove();
                     systemsBtn.textContent = 'Systems';
@@ -606,7 +773,6 @@ function ensureSystemsButton() {
                     if (asciiEl) asciiEl.textContent = getStarFieldArt();
                 } else {
                     currentView = 'shop';
-                    addLoreMessage('[SYSTEMS INTERFACE OPENED]');
                     renderShopControls();
                 }
             });
@@ -624,6 +790,7 @@ function renderShopControls() {
     if (systemsBtn) systemsBtn.textContent = 'Main Console';
     hideConversionSwitch();
     try { window.scrollTo(0,0); } catch(e){}
+    ensureStardustUI();
     let shopControls = document.getElementById('shop-controls');
     if (!shopControls) {
         shopControls = document.createElement('div');
@@ -631,15 +798,73 @@ function renderShopControls() {
         shopControls.style.display = 'flex';
         shopControls.style.flexDirection = 'row';
         shopControls.style.flexWrap = 'wrap';
-        shopControls.style.gap = '12px';
-        shopControls.style.marginTop = '12px';
+    shopControls.style.gap = '12px';
+    shopControls.style.marginTop = '-28px';
         const container = document.getElementById('game-container');
         if (container) container.appendChild(shopControls);
     }
     shopControls.innerHTML = '';
-    // Co-Pilot Upgrade Button
+    shopControls.style.marginTop = '-28px';
+    // Create left column stack for main upgrades
+    const upgradesCol = document.createElement('div');
+    upgradesCol.style.display = 'flex';
+    upgradesCol.style.flexDirection = 'column';
+    upgradesCol.style.alignItems = 'flex-start';
+    upgradesCol.style.gap = '8px';
+    upgradesCol.style.marginTop = '-10px';
+    shopControls.appendChild(upgradesCol);
+    const otherCol = document.createElement('div');
+    otherCol.style.display = 'flex';
+    otherCol.style.flexDirection = 'column';
+    otherCol.style.alignItems = 'flex-start';
+    otherCol.style.gap = '8px';
+    otherCol.style.marginTop = '-10px';
+    shopControls.appendChild(otherCol);
+    // Capacity Upgrade Button (multi-level) — now shown first
+    const capBtn = document.createElement('button');
+    capBtn.textContent = `Upgrade Capacity (Lvl ${capacityLevel}): Cost ${getCapacityUpgradeCost()} DM`;
+    styleShopBtn(capBtn);
+    capBtn.onclick = () => {
+        const cost = getCapacityUpgradeCost();
+        if (fuel >= cost) {
+            fuel -= cost;
+            capacityLevel++;
+            capacityUpgradeCost = Math.ceil(capacityUpgradeCost * 1.2);
+            addLoreMessage(`[ENGINE CAPACITY EXPANDED: ${capacityLevel} DM/s]`);
+            renderShopControls();
+        } else {
+            addLoreMessage('[INSUFFICIENT DM FOR CAPACITY UPGRADE]');
+        }
+    };
+    upgradesCol.appendChild(capBtn);
+    // Info under Capacity about current dump yield
+    const capInfo = document.createElement('div');
+    capInfo.textContent = `Manual Dump: +${currentClickGain()} DM/click`;
+    capInfo.style.fontSize = '12px';
+    capInfo.style.color = '#ccc';
+    capInfo.style.margin = '-2px 0 6px 0';
+    upgradesCol.appendChild(capInfo);
+    // Dump Yield Upgrade (click bonus)
+    const dumpBtn = document.createElement('button');
+    dumpBtn.textContent = `Upgrade Dump Yield (Lvl ${dumpUpgradeLevel}): Cost ${getDumpUpgradeCost()} DM`;
+    styleShopBtn(dumpBtn);
+    dumpBtn.onclick = () => {
+        const cost = getDumpUpgradeCost();
+        if (fuel >= cost) {
+            fuel -= cost;
+            dumpUpgradeLevel++;
+            dumpUpgradeCost = Math.ceil(dumpUpgradeCost * 1.2);
+            addLoreMessage('[MANUAL DUMP YIELD INCREASED: +1 PER CLICK]');
+            updateFuelButtonLabel();
+            renderShopControls();
+        } else {
+            addLoreMessage('[INSUFFICIENT DM FOR DUMP YIELD UPGRADE]');
+        }
+    };
+    upgradesCol.appendChild(dumpBtn);
+    // Co-Pilot Upgrade Button — now shown after Capacity
     const cpBtn = document.createElement('button');
-    cpBtn.textContent = `Upgrade Co-Pilot (Lvl ${coPilotLevel}) Cost ${getCoPilotUpgradeCost()} DM (+2 DM/s)`;
+    cpBtn.textContent = `Upgrade Co-Pilot (Lvl ${coPilotLevel}): Cost ${getCoPilotUpgradeCost()} DM`;
     styleShopBtn(cpBtn);
     cpBtn.onclick = () => {
         const cost = getCoPilotUpgradeCost();
@@ -657,46 +882,46 @@ function renderShopControls() {
             addLoreMessage('[INSUFFICIENT DM FOR CO-PILOT UPGRADE]');
         }
     };
-    shopControls.appendChild(cpBtn);
+    upgradesCol.appendChild(cpBtn);
     // Efficiency Upgrade Button (single)
-    const effBtn = document.createElement('button');
-    effBtn.textContent = efficiencyLevel === 1 ? `Upgrade Efficiency (Cost ${getEfficiencyUpgradeCost()} DM) -> 1 DM = 2 Ly` : 'Efficiency: ENHANCED (1 DM = 2 Ly)';
-    styleShopBtn(effBtn);
     if (efficiencyLevel === 1) {
+        const effBtn = document.createElement('button');
+        effBtn.textContent = `Upgrade Efficiency: Cost ${getEfficiencyUpgradeCost()} DM`;
+        styleShopBtn(effBtn);
         effBtn.onclick = () => {
             const cost = getEfficiencyUpgradeCost();
             if (fuel >= cost) {
                 fuel -= cost;
                 efficiencyLevel = 2;
-                addLoreMessage('[ENGINE EFFICIENCY MATRIX CALIBRATED: 1 DM -> 2 Ly]');
+                addLoreMessage('[ENGINE EFFICIENCY MATRIX CALIBRATED: 1 DM -> 5 Ly]');
                 renderShopControls();
             } else {
                 addLoreMessage('[INSUFFICIENT DM FOR EFFICIENCY UPGRADE]');
             }
         };
-    } else {
-        effBtn.disabled = true;
-        effBtn.style.opacity = '0.6';
+        upgradesCol.appendChild(effBtn);
     }
-    shopControls.appendChild(effBtn);
-    // Capacity Upgrade Button (multi-level)
-    const capBtn = document.createElement('button');
-    const nextCapPreview = `${capacityLevel + 1} DM -> ${(capacityLevel + 1) + (efficiencyLevel - 1)} Ly`;
-    capBtn.textContent = `Upgrade Capacity (Lvl ${capacityLevel}) Cost ${getCapacityUpgradeCost()} DM -> ${nextCapPreview}`;
-    styleShopBtn(capBtn);
-    capBtn.onclick = () => {
-        const cost = getCapacityUpgradeCost();
-        if (fuel >= cost) {
-            fuel -= cost;
-            capacityLevel++;
-            capacityUpgradeCost = Math.ceil(capacityUpgradeCost * 1.2);
-            addLoreMessage(`[ENGINE CAPACITY EXPANDED: ${capacityLevel} DM/s]`);
-            renderShopControls();
-        } else {
-            addLoreMessage('[INSUFFICIENT DM FOR CAPACITY UPGRADE]');
-        }
-    };
-    shopControls.appendChild(capBtn);
+
+    // Star Collapser purchase (appears at 100 Ly if not yet owned)
+    if (lyGauge >= 100 && !starCollapserOnline) {
+        const scBtn = document.createElement('button');
+        scBtn.textContent = `Star-Collapser: Cost 300 DM`;
+        styleShopBtn(scBtn);
+        scBtn.onclick = () => {
+            if (fuel >= 300) {
+                fuel -= 300;
+                starCollapserOnline = true;
+                addLoreMessage('[STAR COLLAPSER ONLINE]');
+                const sd = document.getElementById('stardust-section');
+                if (sd) sd.style.display = 'flex';
+                ensureStardustUI();
+                renderShopControls();
+            } else {
+                addLoreMessage('[INSUFFICIENT DM FOR STAR-COLLAPSER]');
+            }
+        };
+    otherCol.appendChild(scBtn);
+    }
 }
 
 function styleShopBtn(btn) {
@@ -708,6 +933,45 @@ function styleShopBtn(btn) {
     btn.style.boxShadow = '0 2px 8px #000a';
     btn.style.fontSize = '14px';
     btn.style.cursor = 'pointer';
+}
+
+// --- Stardust / Collapser UI wiring ---
+function ensureStardustUI() {
+    const sd = document.getElementById('stardust-section');
+    if (!sd) return;
+    sd.style.display = starCollapserOnline ? 'flex' : 'none';
+    const sdCount = document.getElementById('stardust-count');
+    if (sdCount) sdCount.textContent = `Stardust: ${stardust}`;
+    const collapseBtn = document.getElementById('collapse-btn');
+    if (collapseBtn && !collapseBtn.__wired) {
+        collapseBtn.__wired = true;
+        collapseBtn.addEventListener('click', () => {
+            const now = Date.now();
+            if (!starCollapserOnline) return;
+            if (now < collapseCooldownUntil) return; // still cooling down
+            // award stardust and start cooldown
+            stardust += 1;
+            collapseCooldownUntil = now + 10000; // 10s
+            if (sdCount) sdCount.textContent = `Stardust: ${stardust}`;
+            updateCollapseCooldownUI();
+        });
+    }
+    updateCollapseCooldownUI();
+}
+
+function updateCollapseCooldownUI() {
+    const collapseBtn = document.getElementById('collapse-btn');
+    if (!collapseBtn) return;
+    const now = Date.now();
+    if (now >= collapseCooldownUntil) {
+        collapseBtn.disabled = false;
+        collapseBtn.textContent = 'Collapse (+1)';
+        return;
+    }
+    collapseBtn.disabled = true;
+    const secs = Math.ceil((collapseCooldownUntil - now) / 1000);
+    collapseBtn.textContent = `Collapse (${secs}s)`;
+    setTimeout(updateCollapseCooldownUI, 250);
 }
 
 // --- Conversion switch visibility helpers ---
