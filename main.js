@@ -97,7 +97,7 @@ let developerMode = false; // cheat mode: name 'ajmemes'
 let milestone100Fired = false; // lights on + state
 let milestone100LoreShown = false; // show 100 Lightyears lore once
 // ---- Shop & Upgrades State ----
-let currentView = 'main'; // 'main' or 'shop'
+let currentView = 'main'; // 'main' | 'shop' | 'collapser'
 let coPilotLevel = 1; // each level adds +2 Dark-Matter/sec (base provided by constants)
 // (Deprecated) engineLevel replaced by capacity/efficiency split
 let engineLevel = 1; // legacy (kept for migration)
@@ -222,17 +222,21 @@ function loadGame() {
         } else {
             renderIntro();
         }
-        // If shop was open when saved, render its controls again
-        if (currentView === 'shop') {
+        // If subviews were open when saved, render their controls again
+            if (currentView === 'shop') {
                 ensureSystemsButton();
             // slight delay to ensure DOM nodes exist
             setTimeout(() => { renderShopControls(); }, 50);
-        } else if (currentView === 'collapser') {
-            ensureCollapserBayButton();
+        } else if (currentView === 'collapser' && starCollapserBayOnline) {
+            ensureSystemsButton();
+            ensureCollapserBayNavButton();
             setTimeout(() => { renderCollapserBayControls(); }, 50);
         }
         // Ensure stardust UI reflects saved state
-        setTimeout(() => { ensureStardustUI(); }, 60);
+        setTimeout(() => {
+            ensureStardustUI();
+            if (starCollapserBayOnline) ensureCollapserBayNavButton();
+        }, 60);
     } else {
         renderIntro();
     }
@@ -479,6 +483,8 @@ function getStarFieldArt() {
     const height = 14;
     if (currentView === 'shop') {
         return getShopAscii(width);
+    } else if (currentView === 'collapser') {
+        return getCollapserBayAscii(width);
     }
     let starfield = generateRandomStarfield(width, height);
     let topBorder = '┌' + '─'.repeat(width) + '┐';
@@ -779,7 +785,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderIntro();
     }
     if (coPilotPurchased) ensureSystemsButton();
-    if (starCollapserBayOnline) ensureCollapserBayButton();
+    if (starCollapserBayOnline) { ensureCollapserBayButton(); ensureCollapserBayNavButton(); }
     ensureStardustUI();
     document.getElementById('save-slot-btn').onclick = saveGame;
     document.getElementById('wipe-save-btn').onclick = () => {
@@ -834,12 +840,16 @@ function ensureSystemsButton() {
                     currentView = 'main';
                     const sc = document.getElementById('shop-controls');
                     if (sc) sc.remove();
+                    const bc = document.getElementById('collapser-controls');
+                    if (bc) bc.remove();
                     systemsBtn.textContent = 'Systems';
                     showConversionSwitch();
                     const asciiEl = document.getElementById('ascii');
                     if (asciiEl) asciiEl.textContent = getStarFieldArt();
                 } else {
                     currentView = 'shop';
+                    const bc = document.getElementById('collapser-controls');
+                    if (bc) bc.remove();
                     renderShopControls();
                 }
             });
@@ -858,6 +868,7 @@ function renderShopControls() {
     hideConversionSwitch();
     try { window.scrollTo(0,0); } catch(e){}
     ensureStardustUI();
+    clearSubviewControls();
     let shopControls = document.getElementById('shop-controls');
     if (!shopControls) {
         shopControls = document.createElement('div');
@@ -1069,6 +1080,7 @@ function ensureStardustUI() {
     updateCollapseCooldownUI();
     // Show Collapser Bay access/purchase when applicable
     ensureCollapserBayButton();
+    if (starCollapserBayOnline) ensureCollapserBayNavButton();
 }
 
 function updateCollapseCooldownUI() {
@@ -1077,13 +1089,22 @@ function updateCollapseCooldownUI() {
     const now = Date.now();
     if (now >= collapseCooldownUntil) {
         collapseBtn.disabled = false;
-        collapseBtn.textContent = 'Collapse (+1)';
+        const yieldAmt = collapserYieldBase * collapserEfficiencyLevel;
+        collapseBtn.textContent = `Collapse (+${yieldAmt})`;
         return;
     }
     collapseBtn.disabled = true;
     const secs = Math.ceil((collapseCooldownUntil - now) / 1000);
     collapseBtn.textContent = `Collapse (${secs}s)`;
     setTimeout(updateCollapseCooldownUI, 250);
+}
+
+// Helpers: ensure only one subview's controls are present
+function clearSubviewControls() {
+    const sc = document.getElementById('shop-controls');
+    if (sc) sc.remove();
+    const bc = document.getElementById('collapser-controls');
+    if (bc) bc.remove();
 }
 
 // --- Conversion switch visibility helpers ---
@@ -1158,33 +1179,32 @@ function ensureCollapserBayButton() {
         bayBtn.style.padding = '4px 10px';
         sd.appendChild(bayBtn);
     }
-    bayBtn.style.display = 'inline-block';
-    if (!bayBtn.__wired) {
-        bayBtn.__wired = true;
-        bayBtn.addEventListener('click', () => {
-            currentView = 'collapser';
-            renderCollapserBayControls();
-        });
-    }
-    // If not yet unlocked and enough Stardust, change text to purchase
+    // Show purchase state when locked; hide the button once unlocked (nav lives next to Systems)
     if (!starCollapserBayOnline) {
+        bayBtn.style.display = 'inline-block';
         bayBtn.textContent = stardust >= 10 ? 'Buy Collapser Bay (10 Stardust)' : 'Collapser Bay (Locked)';
         bayBtn.disabled = stardust < 10;
         bayBtn.onclick = () => {
             if (stardust >= 10 && !starCollapserBayOnline) {
                 stardust -= 10;
                 starCollapserBayOnline = true;
+                addLoreMessage('[COLLAPSER BAY CONSTRUCTED — ACCESS PANEL ONLINE]');
                 ensureStardustUI();
+                ensureCollapserBayNavButton();
+                currentView = 'collapser';
+                clearSubviewControls();
                 renderCollapserBayControls();
             }
         };
     } else {
-        bayBtn.disabled = false;
-        bayBtn.textContent = 'Collapser Bay';
+        bayBtn.style.display = 'none';
     }
 }
 
 function renderCollapserBayControls() {
+    // Render inside main bubble like Systems view; clear Systems controls if present
+    const scLeftover = document.getElementById('shop-controls');
+    if (scLeftover) scLeftover.remove();
     const asciiEl = document.getElementById('ascii');
     if (asciiEl) asciiEl.textContent = getCollapserBayAscii(100);
     hideConversionSwitch();
@@ -1203,7 +1223,6 @@ function renderCollapserBayControls() {
         if (container) container.appendChild(bayControls);
     }
     bayControls.innerHTML = '';
-    bayControls.style.marginTop = '-54px';
     // Two columns: Main Upgrades and One-time Upgrades
     const mainCol = document.createElement('div');
     mainCol.style.display = 'flex';
@@ -1309,4 +1328,33 @@ function getCollapserBayAscii(width) {
     lines.push(center(sep));
     lines.push(bottom);
     return lines.join('\n');
+}
+
+// (No dedicated collapser bubble; view is toggled within main bubble.)
+
+function ensureCollapserBayNavButton() {
+    const navBtn = document.getElementById('collapserbay-btn');
+    if (!navBtn) return;
+    navBtn.style.display = 'inline-block';
+    navBtn.style.minWidth = '168px';
+    navBtn.style.padding = '6px 14px';
+    if (!navBtn.__wired) {
+        navBtn.__wired = true;
+        navBtn.addEventListener('click', () => {
+            if (!starCollapserBayOnline) return;
+            if (currentView === 'collapser') {
+                currentView = 'main';
+                const bc = document.getElementById('collapser-controls'); if (bc) bc.remove();
+                const sc = document.getElementById('shop-controls'); if (sc) sc.remove();
+                navBtn.textContent = 'Collapser Bay';
+                showConversionSwitch();
+                const asciiEl = document.getElementById('ascii');
+                if (asciiEl) asciiEl.textContent = getStarFieldArt();
+            } else {
+                currentView = 'collapser';
+                renderCollapserBayControls();
+            }
+        });
+    }
+    navBtn.textContent = currentView === 'collapser' ? 'Main Console' : 'Collapser Bay';
 }
